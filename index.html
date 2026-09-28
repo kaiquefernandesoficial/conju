@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Conju</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Conju">
+<meta name="theme-color" content="#0f766e">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icone-180.png">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0f766e; }
+  /* O app ocupa a tela inteira, inclusive atrás do relógio e da barrinha */
+  iframe { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; border: 0; display: block; }
+  #medida { position: fixed; top: 0; left: 0; visibility: hidden; pointer-events: none;
+    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+</style>
+</head>
+<body>
+<div id="medida"></div>
+<script>
+  // ÚNICA CONFIGURAÇÃO: o link do app publicado no Apps Script (termina em /exec)
+  var URL_DO_SCRIPT = 'AKfycbwr8VR28-ioGfjkRAhWKw_QJpqFe2aeequjWbKQNhCMfwnk0GDL146ObTPxHS545wk0RQ;
+
+  var CHAVE = 'conju_token';
+  function ler() { try { return localStorage.getItem(CHAVE) || ''; } catch (e) { return ''; } }
+  function gravar(t) { try { t ? localStorage.setItem(CHAVE, t) : localStorage.removeItem(CHAVE); } catch (e) {} }
+  function tokenValido(t) { return /^[A-Za-z0-9-]{1,64}$/.test(t || ''); }
+
+  // Link "?s=token" (vindo do app): guarda e limpa da barra de endereço
+  var q = new URLSearchParams(location.search).get('s');
+  if (tokenValido(q)) { gravar(q); history.replaceState(null, '', location.pathname); }
+
+  var token = ler();
+  var frame = document.createElement('iframe');
+  frame.allow = 'clipboard-write';
+  frame.src = URL_DO_SCRIPT + (tokenValido(token) ? '?s=' + encodeURIComponent(token) : '');
+  document.body.appendChild(frame);
+
+  // Mede as áreas do relógio (topo) e da barrinha (baixo) deste aparelho
+  function areas() {
+    var cs = getComputedStyle(document.getElementById('medida'));
+    return { tipo: 'conju-areas', topo: parseFloat(cs.paddingTop) || 0, baixo: parseFloat(cs.paddingBottom) || 0 };
+  }
+  // O app fica alguns níveis de iframe abaixo (moldura do Google) — avisa todos
+  function avisar(win, msg, nivel) {
+    if (nivel > 4) return;
+    for (var i = 0; i < win.frames.length; i++) {
+      try { win.frames[i].postMessage(msg, '*'); } catch (e) {} // só medidas da tela, nada sigiloso
+      try { avisar(win.frames[i], msg, nivel + 1); } catch (e) {}
+    }
+  }
+  function enviarAreas() { avisar(window, areas(), 0); }
+  frame.addEventListener('load', function () { setTimeout(enviarAreas, 300); setTimeout(enviarAreas, 1500); });
+  window.addEventListener('resize', enviarAreas);
+  window.addEventListener('orientationchange', function () { setTimeout(enviarAreas, 400); });
+
+  window.addEventListener('message', function (e) {
+    if (!/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.googleusercontent\.com$/.test(e.origin)) return;
+    var d = e.data || {};
+    if (d.tipo === 'conju-ola') enviarAreas();
+    else if (d.tipo === 'conju-cor' && /^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s.,%]+\))$/.test(String(d.cor || '').trim())) {
+      var cor = String(d.cor).trim();
+      document.querySelector('meta[name=theme-color]').setAttribute('content', cor);
+      document.documentElement.style.background = document.body.style.background = cor;
+    }
+    else if (d.tipo === 'conju-token') {
+      if (d.token === '') gravar('');
+      else if (tokenValido(d.token)) gravar(d.token);
+    }
+  });
+</script>
+</body>
+</html>

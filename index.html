@@ -17,28 +17,204 @@
   iframe { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; border: 0; display: block; }
   #medida { position: fixed; top: 0; left: 0; visibility: hidden; pointer-events: none;
     padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+  /* Tela de bloqueio / avisos da biometria */
+  #camada { display: none; position: fixed; inset: 0; z-index: 10; align-items: center; justify-content: center;
+    padding: calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; }
+  #camada.opaca { background: linear-gradient(160deg, #0f766e 0%, #0b544e 45%, #0a3f3b 100%); }
+  #camada.vidro { background: rgba(8, 40, 38, 0.6); }
+  .cartao { width: 100%; max-width: 340px; background: #ffffff; color: #1f2937; border-radius: 20px;
+    padding: 28px 24px; text-align: center; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3); }
+  .cartao .icone { font-size: 44px; margin-bottom: 6px; }
+  .cartao h1 { font-size: 19px; margin: 0 0 8px; }
+  .cartao p { font-size: 14px; line-height: 1.5; color: #6b7280; margin: 0 0 18px; }
+  .btn { display: block; width: 100%; padding: 14px; border: none; border-radius: 12px; margin-top: 10px;
+    background: #0f766e; color: #ffffff; font-size: 15px; font-weight: 600; font-family: inherit; cursor: pointer; }
+  .btn.sec { background: #f3f4f6; color: #1f2937; }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.6; }
 </style>
 </head>
 <body>
 <div id="medida"></div>
+<div id="camada"></div>
 <script>
   // ÚNICA CONFIGURAÇÃO: o link do app publicado no Apps Script (termina em /exec)
   var URL_DO_SCRIPT = 'https://script.google.com/macros/s/AKfycbwr8VR28-ioGfjkRAhWKw_QJpqFe2aeequjWbKQNhCMfwnk0GDL146ObTPxHS545wk0RQ/exec';
 
   var CHAVE = 'conju_token';
-  function ler() { try { return localStorage.getItem(CHAVE) || ''; } catch (e) { return ''; } }
-  function gravar(t) { try { t ? localStorage.setItem(CHAVE, t) : localStorage.removeItem(CHAVE); } catch (e) {} }
+  var CHAVE_BIO = 'conju_bio_id';              // id da biometria cadastrada neste aparelho
+  var CHAVE_BIO_RECUSOU = 'conju_bio_recusou'; // pessoa tocou em "Agora não"
+
+  function lerC(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function gravarC(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
+  function ler() { return lerC(CHAVE); }
+  function gravar(t) { gravarC(CHAVE, t); }
   function tokenValido(t) { return /^[A-Za-z0-9-]{1,64}$/.test(t || ''); }
+  function bioAtiva() { return !!lerC(CHAVE_BIO); }
 
   // Link "?s=token" (vindo do app): guarda e limpa da barra de endereço
   var q = new URLSearchParams(location.search).get('s');
   if (tokenValido(q)) { gravar(q); history.replaceState(null, '', location.pathname); }
 
-  var token = ler();
-  var frame = document.createElement('iframe');
-  frame.allow = 'clipboard-write';
-  frame.src = URL_DO_SCRIPT + (tokenValido(token) ? '?s=' + encodeURIComponent(token) : '');
-  document.body.appendChild(frame);
+  // ====================================================
+  // BIOMETRIA (WebAuthn: digital / rosto do aparelho)
+  // Tudo fica neste aparelho. É um "cadeado" em cima do login salvo.
+  // ====================================================
+  function paraB64(buf) {
+    var b = new Uint8Array(buf), s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function deB64(t) {
+    t = t.replace(/-/g, '+').replace(/_/g, '/');
+    while (t.length % 4) t += '=';
+    var s = atob(t), b = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b;
+  }
+  function aleatorio(n) { var b = new Uint8Array(n); crypto.getRandomValues(b); return b; }
+
+  function suportaBio() {
+    if (!window.PublicKeyCredential || !navigator.credentials) return Promise.resolve(false);
+    try {
+      return PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+        .then(function (ok) { return !!ok; }, function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
+  }
+
+  function cadastrarBio() {
+    return navigator.credentials.create({ publicKey: {
+      challenge: aleatorio(32),
+      rp: { name: 'Conju', id: location.hostname },
+      user: { id: aleatorio(16), name: 'conju', displayName: 'Conju' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' },
+      timeout: 60000,
+      attestation: 'none'
+    } }).then(function (cred) { gravarC(CHAVE_BIO, paraB64(cred.rawId)); });
+  }
+
+  function verificarBio() {
+    var id = lerC(CHAVE_BIO);
+    if (!id) return Promise.reject(new Error('sem biometria cadastrada'));
+    return navigator.credentials.get({ publicKey: {
+      challenge: aleatorio(32),
+      allowCredentials: [{ type: 'public-key', id: deB64(id), transports: ['internal'] }],
+      userVerification: 'required',
+      timeout: 60000
+    } });
+  }
+
+  // ---------- telas da casca (bloqueio e avisos) ----------
+  var camada = document.getElementById('camada');
+  function mostrarCamada(html, opaca) {
+    camada.className = opaca ? 'opaca' : 'vidro';
+    camada.innerHTML = html;
+    camada.style.display = 'flex';
+  }
+  function fecharCamada() { camada.style.display = 'none'; camada.innerHTML = ''; }
+  function porId(id) { return document.getElementById(id); }
+
+  function aviso(icone, titulo, texto) {
+    mostrarCamada('<div class="cartao"><div class="icone">' + icone + '</div><h1>' + titulo + '</h1><p>' + texto +
+      '</p><button class="btn" id="btnOk">Ok</button></div>', false);
+    porId('btnOk').addEventListener('click', fecharCamada);
+  }
+
+  function mostrarBloqueio() {
+    mostrarCamada('<div class="cartao"><div class="icone">🔐</div><h1>Conju bloqueado</h1>' +
+      '<p id="msgBio">Use sua biometria para entrar.</p>' +
+      '<button class="btn" id="btnDesbloquear">Desbloquear</button>' +
+      '<button class="btn sec" id="btnSenha">Entrar com senha</button></div>', true);
+
+    var ocupado = false;
+    function tentar() {
+      if (ocupado) return;
+      ocupado = true;
+      porId('btnDesbloquear').disabled = true;
+      verificarBio().then(function () {
+        fecharCamada();
+        iniciarApp(ler(), true);
+      }).catch(function (e) {
+        ocupado = false;
+        porId('btnDesbloquear').disabled = false;
+        porId('msgBio').textContent = (e && e.name === 'NotAllowedError')
+          ? 'Não foi possível confirmar. Toque em Desbloquear para tentar de novo.'
+          : 'A biometria deste aparelho mudou. Entre com a senha e ative de novo em Minha casa.';
+      });
+    }
+    porId('btnDesbloquear').addEventListener('click', tentar);
+    porId('btnSenha').addEventListener('click', function () {
+      fecharCamada();
+      iniciarApp('', true); // abre o login normal, sem entrar sozinho
+    });
+    setTimeout(tentar, 300); // já pede a biometria ao abrir (se o navegador não deixar, o botão resolve)
+  }
+
+  function dialogoAtivar(automatico) {
+    mostrarCamada('<div class="cartao"><div class="icone">👆</div><h1>Entrar com biometria?</h1>' +
+      '<p>Da próxima vez o Conju abre com sua digital ou seu rosto, sem digitar senha.</p>' +
+      '<button class="btn" id="btnAtivar">Ativar</button>' +
+      '<button class="btn sec" id="btnAgoraNao">Agora não</button></div>', false);
+    porId('btnAgoraNao').addEventListener('click', function () {
+      if (automatico) gravarC(CHAVE_BIO_RECUSOU, '1');
+      fecharCamada();
+    });
+    porId('btnAtivar').addEventListener('click', function () {
+      porId('btnAtivar').disabled = true;
+      cadastrarBio().then(function () {
+        gravarC(CHAVE_BIO_RECUSOU, '');
+        aviso('✅', 'Biometria ativada', 'Ao abrir o Conju, ele vai pedir sua biometria.');
+      }).catch(function () {
+        aviso('⚠️', 'Não foi possível ativar', 'A biometria foi cancelada ou não está disponível. Tente de novo em Minha casa.');
+      });
+    });
+  }
+
+  var ofertou = false;
+  function ofertarBio() { // logo depois do login
+    if (ofertou || bioAtiva() || lerC(CHAVE_BIO_RECUSOU) || !tokenValido(ler())) return;
+    ofertou = true;
+    suportaBio().then(function (ok) { if (ok) setTimeout(function () { dialogoAtivar(true); }, 1200); });
+  }
+
+  function abrirMenuBio() { // botão 🔐 dentro de "Minha casa"
+    if (!tokenValido(ler())) {
+      aviso('ℹ️', 'Falta salvar o login', 'Para usar biometria, toque em Sair e entre de novo com "Salvar login e senha neste aparelho" marcado.');
+      return;
+    }
+    suportaBio().then(function (ok) {
+      if (!ok) { aviso('ℹ️', 'Biometria indisponível', 'Este aparelho não tem digital/rosto configurado ou o navegador não permite.'); return; }
+      if (!bioAtiva()) { dialogoAtivar(false); return; }
+      mostrarCamada('<div class="cartao"><div class="icone">🔐</div><h1>Biometria ativada</h1>' +
+        '<p>O Conju pede sua biometria ao abrir neste aparelho.</p>' +
+        '<button class="btn sec" id="btnDesativar">Desativar</button>' +
+        '<button class="btn" id="btnFechar">Fechar</button></div>', false);
+      porId('btnFechar').addEventListener('click', fecharCamada);
+      porId('btnDesativar').addEventListener('click', function () {
+        gravarC(CHAVE_BIO, '');
+        aviso('✅', 'Biometria desativada', 'O Conju volta a abrir direto, sem pedir biometria.');
+      });
+    });
+  }
+
+  // ====================================================
+  // O APP (iframe do Apps Script)
+  // ====================================================
+  var frame = null;
+  function iniciarApp(token, bio) {
+    if (frame) return;
+    var p = [];
+    if (tokenValido(token)) p.push('s=' + encodeURIComponent(token));
+    if (bio) p.push('bio=1'); // avisa o app para NÃO entrar sozinho pelo login que ele guarda
+    frame = document.createElement('iframe');
+    frame.allow = 'clipboard-write';
+    frame.src = URL_DO_SCRIPT + (p.length ? '?' + p.join('&') : '');
+    frame.addEventListener('load', function () { setTimeout(enviarAreas, 300); setTimeout(enviarAreas, 1500); });
+    document.body.insertBefore(frame, camada);
+  }
 
   // Mede as áreas do relógio (topo) e da barrinha (baixo) deste aparelho
   function areas() {
@@ -54,7 +230,6 @@
     }
   }
   function enviarAreas() { avisar(window, areas(), 0); }
-  frame.addEventListener('load', function () { setTimeout(enviarAreas, 300); setTimeout(enviarAreas, 1500); });
   window.addEventListener('resize', enviarAreas);
   window.addEventListener('orientationchange', function () { setTimeout(enviarAreas, 400); });
 
@@ -69,9 +244,15 @@
     }
     else if (d.tipo === 'conju-token') {
       if (d.token === '') gravar('');
-      else if (tokenValido(d.token)) gravar(d.token);
+      else if (tokenValido(d.token)) { gravar(d.token); ofertarBio(); }
     }
+    else if (d.tipo === 'conju-bio-menu') abrirMenuBio();
   });
+
+  // ---------- partida ----------
+  var token = ler();
+  if (bioAtiva() && tokenValido(token)) mostrarBloqueio();
+  else iniciarApp(token, bioAtiva());
 </script>
 </body>
 </html>

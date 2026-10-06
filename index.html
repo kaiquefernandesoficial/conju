@@ -376,9 +376,8 @@ const app = initializeApp({
 });
 const VAPID = 'BMz7T3aVZh7pSGJB30NXJfRQOCIO5u-_UvTjswhJ8iE0lPd4_leJMZpgWF4Q1pYTe5ea8UMFESe0c-Ur0swCpNI';
 
-   function avisarApp(msg) {
-     avisar(window, msg, 0);
-   }
+function avisarApp(msg) {
+  avisar(window, msg, 0);
 }
 
 async function obterToken() {
@@ -411,6 +410,6 @@ window.addEventListener('message', async (e) => {
     document.body.appendChild(b);
   }
 });
-</script>  
+</script>
 </body>
 </html>

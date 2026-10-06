@@ -362,5 +362,54 @@
   if (bioAtiva() && tokenValido(token)) mostrarBloqueio();
   else iniciarApp(token, bioAtiva());
 </script>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { getMessaging, getToken } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
+
+const app = initializeApp({
+  apiKey: "AIzaSyClDlO-NtwvCk52YMcHCyxg4Vd1QiM8q4Y",
+  authDomain: "conju-4dd92.firebaseapp.com",
+  projectId: "conju-4dd92",
+  storageBucket: "conju-4dd92.firebasestorage.app",
+  messagingSenderId: "550159743653",
+  appId: "1:550159743653:web:ce62bc1ef1df6b13feeb4c"
+});
+const VAPID = 'BMz7T3aVZh7pSGJB30NXJfRQOCIO5u-_UvTjswhJ8iE0lPd4_leJMZpgWF4Q1pYTe5ea8UMFESe0c-Ur0swCpNI';
+
+function avisarApp(msg) {
+  if (window.frame) window.frame.contentWindow.postMessage(msg, '*');
+}
+
+async function obterToken() {
+  const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+  return getToken(getMessaging(app), { vapidKey: VAPID, serviceWorkerRegistration: reg });
+}
+
+window.addEventListener('message', async (e) => {
+  const d = e.data || {};
+  if (d.tipo === 'conju-push-estado') {
+    if (!('Notification' in window)) { avisarApp({ tipo: 'conju-push', estado: 'indisponivel' }); return; }
+    if (Notification.permission === 'granted') {
+      try { avisarApp({ tipo: 'conju-push', estado: 'ativo', token: await obterToken() }); }
+      catch (err) { avisarApp({ tipo: 'conju-push', estado: 'erro' }); }
+    } else {
+      avisarApp({ tipo: 'conju-push', estado: Notification.permission === 'denied' ? 'negado' : 'inativo' });
+    }
+  }
+  if (d.tipo === 'conju-push-ativar') {
+    const b = document.createElement('button');
+    b.textContent = '🔔 Toque para permitir notificações';
+    b.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:9999;padding:14px 20px;border:0;border-radius:14px;background:#0f766e;color:#fff;font-size:15px;font-weight:600';
+    b.onclick = async () => {
+      b.remove();
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') { avisarApp({ tipo: 'conju-push', estado: 'negado' }); return; }
+      try { avisarApp({ tipo: 'conju-push', estado: 'ativo', token: await obterToken() }); }
+      catch (err) { avisarApp({ tipo: 'conju-push', estado: 'erro' }); }
+    };
+    document.body.appendChild(b);
+  }
+});
+</script>  
 </body>
 </html>

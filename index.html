@@ -377,7 +377,7 @@ const app = initializeApp({
 const VAPID = 'BMz7T3aVZh7pSGJB30NXJfRQOCIO5u-_UvTjswhJ8iE0lPd4_leJMZpgWF4Q1pYTe5ea8UMFESe0c-Ur0swCpNI';
 
 function avisarApp(msg) {
-  if (window.frame) window.frame.contentWindow.postMessage(msg, '*');
+  avisar(window, msg, 0); // usa a função que já existe no script de cima e desce por todos os iframes
 }
 
 async function obterToken() {

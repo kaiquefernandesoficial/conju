@@ -344,6 +344,7 @@
   window.addEventListener('message', function (e) {
     if (!/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.googleusercontent\.com$/.test(e.origin)) return;
     var d = e.data || {};
+    if (d.tipo === 'conju-push') { aoReceberPush(d); return; }
     if (d.tipo === 'conju-ola') enviarAreas();
     else if (d.tipo === 'conju-cor' && /^(#[0-9a-fA-F]{3,8}|rgba?\([\d\s.,%]+\))$/.test(String(d.cor || '').trim())) {
       var cor = String(d.cor).trim();
